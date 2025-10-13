@@ -7,6 +7,7 @@ use josemmo\Verifactu\Models\ComputerSystem;
 use josemmo\Verifactu\Models\Records\CancellationRecord;
 use josemmo\Verifactu\Models\Records\FiscalIdentifier;
 use josemmo\Verifactu\Models\Records\RegistrationRecord;
+use josemmo\Verifactu\Models\Responses\AeatResponse;
 use UXML\UXML;
 
 /**
@@ -82,31 +83,15 @@ class AeatClient {
     }
 
     /**
-     * Send registration records
-     *
-     * @param RegistrationRecord[] $records Registration records
-     *
-     * @return UXML XML response from web service
-     *
-     * @throws GuzzleException if request failed
-     *
-     * @deprecated 0.0.3 Use the `send()` method instead.
-     * @see AeatClient::send
-     */
-    public function sendRegistrationRecords(array $records): UXML {
-        return $this->send($records);
-    }
-
-    /**
      * Send invoicing records
      *
      * @param (RegistrationRecord|CancellationRecord)[] $records Invoicing records
      *
-     * @return UXML XML response from web service
+     * @return AeatResponse Response from service
      *
      * @throws GuzzleException if request failed
      */
-    public function send(array $records): UXML {
+    public function send(array $records): AeatResponse {
         // Build initial request
         $xml = UXML::newInstance('soapenv:Envelope', null, [
             'xmlns:soapenv' => self::NS_SOAPENV,
@@ -178,7 +163,10 @@ class AeatClient {
             ],
             'body' => $xml->asXML(),
         ]);
-        return UXML::fromString($response->getBody()->getContents());
+
+        // Parse and return response
+        $xmlResponse = UXML::fromString($response->getBody()->getContents());
+        return AeatResponse::from($xmlResponse);
     }
 
     /**
