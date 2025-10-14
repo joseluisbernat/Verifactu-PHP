@@ -24,6 +24,8 @@ class AeatClient {
     private readonly Client $client;
     private bool $isProduction = true;
     private bool $isIncidencia = false;
+    private ?string $lastXMLSent = null;
+    private ?string $lastXMLReceived = null;
 
     /**
      * Class constructor
@@ -161,12 +163,12 @@ class AeatClient {
             'headers' => [
                 'Content-Type' => 'text/xml',
             ],
-            'body' => $xml->asXML(),
+            'body' => $this->lastXMLSent=($xml->asXML()),
         ]);
 
         // Parse and return response
-        $xmlResponse = UXML::fromString($response->getBody()->getContents());
-        return AeatResponse::from($xmlResponse);
+        $this->lastXMLReceived = UXML::fromString($response->getBody()->getContents());
+        return AeatResponse::from($this->lastXMLReceived);
     }
 
     /**
@@ -273,4 +275,15 @@ class AeatClient {
     private function getBaseUri(): string {
         return $this->isProduction ? 'https://www1.agenciatributaria.gob.es' : 'https://prewww1.aeat.es';
     }
+
+    public function getLastXMLReceived(): ?string
+    {
+        return $this->lastXMLReceived;
+    }
+
+    public function getLastXMLSent(): ?string
+    {
+        return $this->lastXMLSent;
+    }
+
 }
