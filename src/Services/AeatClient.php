@@ -3,11 +3,15 @@ namespace josemmo\Verifactu\Services;
 
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Promise\PromiseInterface;
+use josemmo\Verifactu\Exceptions\AeatException;
 use josemmo\Verifactu\Models\ComputerSystem;
 use josemmo\Verifactu\Models\Records\CancellationRecord;
 use josemmo\Verifactu\Models\Records\FiscalIdentifier;
 use josemmo\Verifactu\Models\Records\RegistrationRecord;
 use josemmo\Verifactu\Models\Responses\AeatResponse;
+use Psr\Http\Message\ResponseInterface;
+use SensitiveParameter;
 use UXML\UXML;
 
 /**
@@ -20,8 +24,10 @@ class AeatClient {
 
     private readonly ComputerSystem $system;
     private readonly FiscalIdentifier $taxpayer;
-    private ?FiscalIdentifier $representative = null;
     private readonly Client $client;
+    private ?string $certificatePath = null;
+    private ?string $certificatePassword = null;
+    private ?FiscalIdentifier $representative = null;
     private bool $isProduction = true;
     private bool $isIncidencia = false;
     private ?string $lastXMLSent = null;
@@ -30,27 +36,37 @@ class AeatClient {
     /**
      * Class constructor
      *
-     * NOTE: The certificate path must have the ".p12" extension to be recognized as a PFX bundle.
-     *
-     * @param ComputerSystem   $system       Computer system details
-     * @param FiscalIdentifier $taxpayer     Taxpayer details (party that issues the invoices)
-     * @param string           $certPath     Path to encrypted PEM certificate or PKCS#12 (PFX) bundle
-     * @param string|null      $certPassword Certificate password or `null` for none
+     * @param ComputerSystem   $system     Computer system details
+     * @param FiscalIdentifier $taxpayer   Taxpayer details (party that issues the invoices)
+     * @param Client|null      $httpClient Custom HTTP client, leave empty to create a new one
      */
     public function __construct(
         ComputerSystem $system,
         FiscalIdentifier $taxpayer,
-        string $certPath,
-        ?string $certPassword = null,
+        ?Client $httpClient = null,
     ) {
         $this->system = $system;
         $this->taxpayer = $taxpayer;
-        $this->client = new Client([
-            'cert' => ($certPassword === null) ? $certPath : [$certPath, $certPassword],
-            'headers' => [
-                'User-Agent' => "Mozilla/5.0 (compatible; {$system->name}/{$system->version})",
-            ],
-        ]);
+        $this->client = $httpClient ?? new Client();
+    }
+
+    /**
+     * Set certificate
+     *
+     * NOTE: The certificate path must have the ".p12" extension to be recognized as a PFX bundle.
+     *
+     * @param string      $certificatePath     Path to encrypted PEM certificate or PKCS#12 (PFX) bundle
+     * @param string|null $certificatePassword Certificate password or `null` for none
+     *
+     * @return $this This instance
+     */
+    public function setCertificate(
+        #[SensitiveParameter] string $certificatePath,
+        #[SensitiveParameter] ?string $certificatePassword = null,
+    ): static {
+        $this->certificatePath = $certificatePath;
+        $this->certificatePassword = $certificatePassword;
+        return $this;
     }
 
     /**
@@ -89,11 +105,12 @@ class AeatClient {
      *
      * @param (RegistrationRecord|CancellationRecord)[] $records Invoicing records
      *
-     * @return AeatResponse Response from service
+     * @return PromiseInterface<AeatResponse> Response from service
      *
-     * @throws GuzzleException if request failed
+     * @throws AeatException   if AEAT server returned an error
+     * @throws GuzzleException if request sending failed
      */
-    public function send(array $records): AeatResponse {
+    public function send(array $records): PromiseInterface { /** @phpstan-ignore generics.notGeneric */
         // Build initial request
         $xml = UXML::newInstance('soapenv:Envelope', null, [
             'xmlns:soapenv' => self::NS_SOAPENV,
@@ -119,57 +136,31 @@ class AeatClient {
 
         // Add registration records
         foreach ($records as $record) {
-            $isRegistrationRecord = $record instanceof RegistrationRecord;
-            $recordElementName = $isRegistrationRecord ? 'RegistroAlta' : 'RegistroAnulacion';
-            $recordElement = $baseElement->add('sum:RegistroFactura')->add("sum1:$recordElementName");
-            $recordElement->add('sum1:IDVersion', '1.0');
-
-            if ($isRegistrationRecord) {
-                $this->addRegistrationRecordProperties($recordElement, $record);
-            } else {
-                $this->addCancellationRecordProperties($recordElement, $record);
-            }
-
-            $encadenamientoElement = $recordElement->add('sum1:Encadenamiento');
-            if ($record->previousInvoiceId === null) {
-                $encadenamientoElement->add('sum1:PrimerRegistro', 'S');
-            } else {
-                $registroAnteriorElement = $encadenamientoElement->add('sum1:RegistroAnterior');
-                $registroAnteriorElement->add('sum1:IDEmisorFactura', $record->previousInvoiceId->issuerId);
-                $registroAnteriorElement->add('sum1:NumSerieFactura', $record->previousInvoiceId->invoiceNumber);
-                $registroAnteriorElement->add('sum1:FechaExpedicionFactura', $record->previousInvoiceId->issueDate->format('d-m-Y'));
-                $registroAnteriorElement->add('sum1:Huella', $record->previousHash);
-            }
-
-            $sistemaInformaticoElement = $recordElement->add('sum1:SistemaInformatico');
-            $sistemaInformaticoElement->add('sum1:NombreRazon', $this->system->vendorName);
-            $sistemaInformaticoElement->add('sum1:NIF', $this->system->vendorNif);
-            $sistemaInformaticoElement->add('sum1:NombreSistemaInformatico', $this->system->name);
-            $sistemaInformaticoElement->add('sum1:IdSistemaInformatico', $this->system->id);
-            $sistemaInformaticoElement->add('sum1:Version', $this->system->version);
-            $sistemaInformaticoElement->add('sum1:NumeroInstalacion', $this->system->installationNumber);
-            $sistemaInformaticoElement->add('sum1:TipoUsoPosibleSoloVerifactu', $this->system->onlySupportsVerifactu ? 'S' : 'N');
-            $sistemaInformaticoElement->add('sum1:TipoUsoPosibleMultiOT', $this->system->supportsMultipleTaxpayers ? 'S' : 'N');
-            $sistemaInformaticoElement->add('sum1:IndicadorMultiplesOT', $this->system->hasMultipleTaxpayers ? 'S' : 'N');
-
-            $recordElement->add('sum1:FechaHoraHusoGenRegistro', $record->hashedAt->format('c'));
-            $recordElement->add('sum1:TipoHuella', '01'); // SHA-256
-            $recordElement->add('sum1:Huella', $record->hash);
+            $record->export($baseElement->add('sum:RegistroFactura'), $this->system);
         }
 
         // Send request
-        $response = $this->client->post('/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP', [
+        $options = [
             'base_uri' => $this->getBaseUri(),
             'headers' => [
                 'Content-Type' => 'text/xml',
+                'User-Agent' => "Mozilla/5.0 (compatible; {$this->system->name}/{$this->system->version})",
             ],
             'body' => $this->lastXMLSent=($xml->asXML()),
         ]);
+	if ($this->certificatePath !== null) {
+            $options['cert'] = ($this->certificatePassword === null) ?
+                $this->certificatePath :
+                [$this->certificatePath, $this->certificatePassword];
+        }
+        $responsePromise = $this->client->postAsync('/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP', $options);
 
         // Parse and return response
-        $this->lastXMLReceived = UXML::fromString($response->getBody()->getContents());
-        return AeatResponse::from($this->lastXMLReceived);
-    }
+          return $responsePromise
+            ->then(fn (ResponseInterface $response): string => $response->getBody()->getContents())
+            ->then(fn (string $response): UXML => UXML::fromString($response))
+            ->then(fn (UXML $xml): AeatResponse => AeatResponse::from($xml));
+      
 
     /**
      * Add registration record properties
