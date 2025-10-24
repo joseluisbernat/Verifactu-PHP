@@ -110,7 +110,9 @@ class AeatClient {
      * @throws AeatException   if AEAT server returned an error
      * @throws GuzzleException if request sending failed
      */
-    public function send(array $records): PromiseInterface { /** @phpstan-ignore generics.notGeneric */
+    public function send(array $records): PromiseInterface
+    {
+        /** @phpstan-ignore generics.notGeneric */
         // Build initial request
         $xml = UXML::newInstance('soapenv:Envelope', null, [
             'xmlns:soapenv' => self::NS_SOAPENV,
@@ -132,7 +134,7 @@ class AeatClient {
         }
 
         $remisionVoluntariaElement = $cabeceraElement->add('sum1:RemisionVoluntaria');
-        $remisionVoluntariaElement->add('sum1:Incidencia', $this->isIncidencia ? 'S':'N');
+        $remisionVoluntariaElement->add('sum1:Incidencia', $this->isIncidencia ? 'S' : 'N');
 
         // Add registration records
         foreach ($records as $record) {
@@ -146,9 +148,9 @@ class AeatClient {
                 'Content-Type' => 'text/xml',
                 'User-Agent' => "Mozilla/5.0 (compatible; {$this->system->name}/{$this->system->version})",
             ],
-            'body' => $this->lastXMLSent=($xml->asXML()),
+            'body' => $this->lastXMLSent = ($xml->asXML()),
         ];
-	if ($this->certificatePath !== null) {
+        if ($this->certificatePath !== null) {
             $options['cert'] = ($this->certificatePassword === null) ?
                 $this->certificatePath :
                 [$this->certificatePath, $this->certificatePassword];
@@ -156,10 +158,10 @@ class AeatClient {
         $responsePromise = $this->client->postAsync('/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP', $options);
 
         // Parse and return response
-          return $responsePromise
-            ->then(fn (ResponseInterface $response): string => $this->lastXMLReceived= $response->getBody()->getContents())
-            ->then(fn (string $response): UXML => UXML::fromString($response))
-            ->then(fn (UXML $xml): AeatResponse => AeatResponse::from($xml));
+        return $responsePromise
+            ->then(fn(ResponseInterface $response): string => $this->lastXMLReceived=$response->getBody()->getContents())
+            ->then(fn(string $response): UXML => UXML::fromString($response))
+            ->then(fn(UXML $xml): AeatResponse => AeatResponse::from($xml));
     }
 
     /**
