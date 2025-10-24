@@ -132,6 +132,12 @@ class AeatResponse extends Model {
                 $item->errorDescription = $errorDescriptionElement->asText();
             }
 
+            if ($item->errorCode == '3000') {
+                $item->statusDuplicated = $itemElement->get("{{$nsTikr}}RegistroDuplicado/{{$nsTik}}EstadoRegistroDuplicado")?->asText() ?? null;
+                $item->errorCodeDuplicated = $itemElement->get("{{$nsTikr}}:RegistroDuplicado/{{$nsTik}}CodigoErrorRegistro")?->asText() ?? null;
+                $item->requestIDDuplicated = $itemElement->get("{{$nsTikr}}:RegistroDuplicado/{{$nsTik}}IdPeticionRegistroDuplicado")?->asText() ?? null;
+            }
+
             $instance->items[] = $item;
         }
 
