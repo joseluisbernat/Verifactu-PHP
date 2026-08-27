@@ -1,4 +1,5 @@
 <?php
+
 namespace josemmo\Verifactu\Services;
 
 use DateTimeImmutable;
@@ -20,7 +21,8 @@ use UXML\UXML;
 /**
  * Class to communicate with the AEAT web service endpoint for VERI*FACTU
  */
-class AeatClient {
+class AeatClient
+{
     /** SOAP envelope XML namespace */
     public const NS_SOAPENV = 'http://schemas.xmlsoap.org/soap/envelope/';
     /** Client XML namespace */
@@ -38,19 +40,23 @@ class AeatClient {
     private bool $isLastRequirementSubmission = false;
     private bool $isProduction = true;
     private bool $isEntitySeal = false;
+    private bool $isIncidencia = false;
+    private ?string $lastXMLSent = null;
+    private ?string $lastXMLReceived = null;
 
     /**
      * Class constructor
      *
-     * @param ComputerSystem   $system     Computer system details
-     * @param FiscalIdentifier $taxpayer   Taxpayer details (party that issues the invoices)
-     * @param Client|null      $httpClient Custom HTTP client, leave empty to create a new one
+     * @param ComputerSystem $system Computer system details
+     * @param FiscalIdentifier $taxpayer Taxpayer details (party that issues the invoices)
+     * @param Client|null $httpClient Custom HTTP client, leave empty to create a new one
      */
     public function __construct(
-        ComputerSystem $system,
+        ComputerSystem   $system,
         FiscalIdentifier $taxpayer,
-        ?Client $httpClient = null,
-    ) {
+        ?Client          $httpClient = null,
+    )
+    {
         $this->system = $system;
         $this->taxpayer = $taxpayer;
         $this->client = $httpClient ?? new Client();
@@ -61,15 +67,16 @@ class AeatClient {
      *
      * NOTE: The certificate path must have the ".p12" extension to be recognized as a PFX bundle.
      *
-     * @param string      $certificatePath     Path to encrypted PEM certificate or PKCS#12 (PFX) bundle
+     * @param string $certificatePath Path to encrypted PEM certificate or PKCS#12 (PFX) bundle
      * @param string|null $certificatePassword Certificate password or `null` for none
      *
      * @return $this This instance
      */
     public function setCertificate(
-        #[SensitiveParameter] string $certificatePath,
+        #[SensitiveParameter] string  $certificatePath,
         #[SensitiveParameter] ?string $certificatePassword = null,
-    ): static {
+    ): static
+    {
         $this->certificatePath = $certificatePath;
         $this->certificatePassword = $certificatePassword;
         return $this;
@@ -84,7 +91,8 @@ class AeatClient {
      *
      * @return $this This instance
      */
-    public function setRepresentative(?FiscalIdentifier $representative): static {
+    public function setRepresentative(?FiscalIdentifier $representative): static
+    {
         $this->representative = $representative;
         return $this;
     }
@@ -92,12 +100,13 @@ class AeatClient {
     /**
      * Set end date of voluntary remission
      *
-     * @param DateTimeImmutable|null $endDate              End date (time part will be ignored) or `null` to clear
-     * @param bool                   $isAffectedByIncident Whether voluntary remission was at some point affected by a technical incident
+     * @param DateTimeImmutable|null $endDate End date (time part will be ignored) or `null` to clear
+     * @param bool $isAffectedByIncident Whether voluntary remission was at some point affected by a technical incident
      *
      * @return $this This instance
      */
-    public function setVoluntaryRemissionEndDate(?DateTimeImmutable $endDate, bool $isAffectedByIncident = false): static {
+    public function setVoluntaryRemissionEndDate(?DateTimeImmutable $endDate, bool $isAffectedByIncident = false): static
+    {
         $this->voluntaryRemissionEndDate = $endDate;
         $this->isVoluntaryRemissionAffectedByIncident = $isAffectedByIncident;
         return $this;
@@ -109,12 +118,13 @@ class AeatClient {
      * Mandatory in case a of a non-voluntary remission upon request by the AEAT ("remisión por requerimiento").
      * Otherwise must be unset.
      *
-     * @param string|null $requirementReference        Requirement reference or `null` to clear
-     * @param boolean     $isLastRequirementSubmission Whether there are no more records to submit after this remission
+     * @param string|null $requirementReference Requirement reference or `null` to clear
+     * @param boolean $isLastRequirementSubmission Whether there are no more records to submit after this remission
      *
      * @return $this This instance
      */
-    public function setRequirementReference(?string $requirementReference, bool $isLastRequirementSubmission = false): static {
+    public function setRequirementReference(?string $requirementReference, bool $isLastRequirementSubmission = false): static
+    {
         $this->requirementReference = $requirementReference;
         $this->isLastRequirementSubmission = $isLastRequirementSubmission;
         return $this;
@@ -127,8 +137,15 @@ class AeatClient {
      *
      * @return $this This instance
      */
-    public function setProduction(bool $production): static {
+    public function setProduction(bool $production): static
+    {
         $this->isProduction = $production;
+        return $this;
+    }
+
+    public function setIncidencia(bool $incidencia): static
+    {
+        $this->isIncidencia = $incidencia;
         return $this;
     }
 
@@ -139,7 +156,8 @@ class AeatClient {
      *
      * @return $this This instance
      */
-    public function setEntitySeal(bool $entitySeal): static {
+    public function setEntitySeal(bool $entitySeal): static
+    {
         $this->isEntitySeal = $entitySeal;
         return $this;
     }
@@ -154,7 +172,9 @@ class AeatClient {
      * @throws AeatException            if AEAT server returned an error
      * @throws ClientExceptionInterface if request sending failed
      */
-    public function send(array $records): PromiseInterface { /** @phpstan-ignore generics.notGeneric */
+    public function send(array $records): PromiseInterface
+    {
+        /** @phpstan-ignore generics.notGeneric */
         // Build initial request
         $xml = UXML::newInstance('soapenv:Envelope', null, [
             'xmlns:soapenv' => self::NS_SOAPENV,
@@ -185,6 +205,9 @@ class AeatClient {
             $remisionRequerimientoElement->add('sum1:FinRequerimiento', $this->isLastRequirementSubmission ? 'S' : 'N');
         }
 
+        $remisionVoluntariaElement = $cabeceraElement->add('sum1:RemisionVoluntaria');
+        $remisionVoluntariaElement->add('sum1:Incidencia', $this->isIncidencia ? 'S' : 'N');
+
         // Add registration records
         foreach ($records as $record) {
             $record->export($baseElement->add('sum:RegistroFactura'), $this->system);
@@ -198,7 +221,7 @@ class AeatClient {
                 'Content-Type' => 'text/xml',
                 'User-Agent' => "Mozilla/5.0 (compatible; {$this->system->name}/{$this->system->version})",
             ],
-            'body' => $xml->asXML(),
+            'body' => $this->lastXMLSent = ($xml->asXML()),
         ];
         if ($this->certificatePath !== null) {
             $options['cert'] = ($this->certificatePassword === null) ?
@@ -209,15 +232,114 @@ class AeatClient {
 
         // Parse and return response
         return $responsePromise
-            ->then(fn (ResponseInterface $response): string => $response->getBody()->getContents())
+            ->then(fn(ResponseInterface $response): string => $response->getBody()->getContents())
             ->then(function (string $response): UXML {
                 try {
+                    $this->lastXMLReceived = $response;
                     return UXML::fromString($response);
                 } catch (InvalidArgumentException $e) {
                     throw new AeatException('Failed to parse XML response', previous: $e);
                 }
             })
-            ->then(fn (UXML $xml): AeatResponse => AeatResponse::from($xml));
+            ->then(fn(UXML $xml): AeatResponse => AeatResponse::from($xml));
+    }
+
+    /**
+     * Add registration record properties
+     *
+     * @param UXML $recordElement Element to fill
+     * @param RegistrationRecord $record Registration record instance
+     */
+    private function addRegistrationRecordProperties(UXML $recordElement, RegistrationRecord $record): void
+    {
+        $idFacturaElement = $recordElement->add('sum1:IDFactura');
+        $idFacturaElement->add('sum1:IDEmisorFactura', $record->invoiceId->issuerId);
+        $idFacturaElement->add('sum1:NumSerieFactura', $record->invoiceId->invoiceNumber);
+        $idFacturaElement->add('sum1:FechaExpedicionFactura', $record->invoiceId->issueDate->format('d-m-Y'));
+
+        $recordElement->add('sum1:NombreRazonEmisor', $record->issuerName);
+        $recordElement->add('sum1:Subsanacion', $record->isCorrection ? 'S' : 'N');
+        $recordElement->add('sum1:TipoFactura', $record->invoiceType->value);
+
+        if ($record->correctiveType !== null) {
+            $recordElement->add('sum1:TipoRectificativa', $record->correctiveType->value);
+        }
+        if (count($record->correctedInvoices) > 0) {
+            $facturasRectificadasElement = $recordElement->add('sum1:FacturasRectificadas');
+            foreach ($record->correctedInvoices as $correctedInvoice) {
+                $facturaRectificadaElement = $facturasRectificadasElement->add('sum1:IDFacturaRectificada');
+                $facturaRectificadaElement->add('sum1:IDEmisorFactura', $correctedInvoice->issuerId);
+                $facturaRectificadaElement->add('sum1:NumSerieFactura', $correctedInvoice->invoiceNumber);
+                $facturaRectificadaElement->add('sum1:FechaExpedicionFactura', $correctedInvoice->issueDate->format('d-m-Y'));
+            }
+        }
+        if (count($record->replacedInvoices) > 0) {
+            $facturasSustituidasElement = $recordElement->add('sum1:FacturasSustituidas');
+            foreach ($record->replacedInvoices as $replacedInvoice) {
+                $facturaSustituidaElement = $facturasSustituidasElement->add('sum1:IDFacturaSustituida');
+                $facturaSustituidaElement->add('sum1:IDEmisorFactura', $replacedInvoice->issuerId);
+                $facturaSustituidaElement->add('sum1:NumSerieFactura', $replacedInvoice->invoiceNumber);
+                $facturaSustituidaElement->add('sum1:FechaExpedicionFactura', $replacedInvoice->issueDate->format('d-m-Y'));
+            }
+        }
+        if ($record->correctedBaseAmount !== null && $record->correctedTaxAmount !== null) {
+            $importeRectificacionElement = $recordElement->add('sum1:ImporteRectificacion');
+            $importeRectificacionElement->add('sum1:BaseRectificada', $record->correctedBaseAmount);
+            $importeRectificacionElement->add('sum1:CuotaRectificada', $record->correctedTaxAmount);
+        }
+
+        $recordElement->add('sum1:DescripcionOperacion', $record->description);
+
+        if (count($record->recipients) > 0) {
+            $destinatariosElement = $recordElement->add('sum1:Destinatarios');
+            foreach ($record->recipients as $recipient) {
+                $destinatarioElement = $destinatariosElement->add('sum1:IDDestinatario');
+                $destinatarioElement->add('sum1:NombreRazon', $recipient->name);
+                if ($recipient instanceof FiscalIdentifier) {
+                    $destinatarioElement->add('sum1:NIF', $recipient->nif);
+                } else {
+                    $idOtroElement = $destinatarioElement->add('sum1:IDOtro');
+                    $idOtroElement->add('sum1:CodigoPais', $recipient->country);
+                    $idOtroElement->add('sum1:IDType', $recipient->type->value);
+                    $idOtroElement->add('sum1:ID', $recipient->value);
+                }
+            }
+        }
+
+        $desgloseElement = $recordElement->add('sum1:Desglose');
+        foreach ($record->breakdown as $breakdownDetails) {
+            $detalleDesgloseElement = $desgloseElement->add('sum1:DetalleDesglose');
+            $detalleDesgloseElement->add('sum1:Impuesto', $breakdownDetails->taxType->value);
+            $detalleDesgloseElement->add('sum1:ClaveRegimen', $breakdownDetails->regimeType->value);
+            $detalleDesgloseElement->add(
+                $breakdownDetails->operationType->isExempt() ? 'sum1:OperacionExenta' : 'sum1:CalificacionOperacion',
+                $breakdownDetails->operationType->value,
+            );
+            if ($breakdownDetails->taxRate !== null) {
+                $detalleDesgloseElement->add('sum1:TipoImpositivo', $breakdownDetails->taxRate);
+            }
+            $detalleDesgloseElement->add('sum1:BaseImponibleOimporteNoSujeto', $breakdownDetails->baseAmount);
+            if ($breakdownDetails->taxAmount !== null) {
+                $detalleDesgloseElement->add('sum1:CuotaRepercutida', $breakdownDetails->taxAmount);
+            }
+        }
+
+        $recordElement->add('sum1:CuotaTotal', $record->totalTaxAmount);
+        $recordElement->add('sum1:ImporteTotal', $record->totalAmount);
+    }
+
+    /**
+     * Add cancellation record properties
+     *
+     * @param UXML $recordElement Element to fill
+     * @param CancellationRecord $record Cancellation record instance
+     */
+    private function addCancellationRecordProperties(UXML $recordElement, CancellationRecord $record): void
+    {
+        $idFacturaElement = $recordElement->add('sum1:IDFactura');
+        $idFacturaElement->add('sum1:IDEmisorFacturaAnulada', $record->invoiceId->issuerId);
+        $idFacturaElement->add('sum1:NumSerieFacturaAnulada', $record->invoiceId->invoiceNumber);
+        $idFacturaElement->add('sum1:FechaExpedicionFacturaAnulada', $record->invoiceId->issueDate->format('d-m-Y'));
     }
 
     /**
@@ -225,10 +347,22 @@ class AeatClient {
      *
      * @return string Base URI
      */
-    private function getBaseUri(): string {
+    private function getBaseUri(): string
+    {
         if ($this->isEntitySeal) {
             return $this->isProduction ? 'https://www10.agenciatributaria.gob.es' : 'https://prewww10.aeat.es';
         }
         return $this->isProduction ? 'https://www1.agenciatributaria.gob.es' : 'https://prewww1.aeat.es';
     }
+
+    public function getLastXMLReceived(): ?string
+    {
+        return $this->lastXMLReceived;
+    }
+
+    public function getLastXMLSent(): ?string
+    {
+        return $this->lastXMLSent;
+    }
+
 }
